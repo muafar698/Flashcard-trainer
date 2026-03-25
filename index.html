@@ -1,243 +1,461 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>Flashcard Trainer</title>
-
-<style>
-body {
-   font-family: Arial;
-   text-align: center;
-   padding: 20px;
-}
-
-.card {
-   border: 2px solid black;
-   padding: 20px;
-   margin: 20px auto;
-   width: 60%;
-   min-height: 120px;
-   font-size: 24px;
-}
-
-button {
-   padding: 10px 20px;
-   margin: 5px;
-   font-size: 16px;
-}
-
-#wrongPanel {
-   margin-top: 30px;
-   border-top: 2px solid gray;
-   padding-top: 15px;
-}
-</style>
-
-</head>
-
-<body>
-
-<h1>Flashcard Trainer</h1>
-
-<input type="file" id="fileInput">
-
-<div class="card" id="wordBox">
-Ladda en TXT-fil för att börja
-</div>
-
-<div>
-
-<button onclick="showAnswer()">Visa svar</button>
-
-<button onclick="markCorrect()">
-✅ Rätt
-</button>
-
-<button onclick="markWrong()">
-❌ Fel
-</button>
-
-<button onclick="showWrongPanel()">
-Visa fel-lista
-</button>
-
-<button onclick="nextCard()">
-Nästa
-</button>
-
-</div>
-
-<div id="wrongPanel" style="display:none;">
-
-<h2>Fel ord</h2>
-
-<div id="wrongList"></div>
-
-</div>
-
 <script>
 
-let cards = []
-let wrongCards = []
-let currentIndex = 0
-let showingAnswer = false
+var LS_WRONG='ff_wrong_words';
+var LS_PROGRESS='ff_progress';
 
-document
-.getElementById("fileInput")
-.addEventListener("change", loadFile)
+var allCards=[];
+var deck=[];
+var currentIndex=0;
 
-function loadFile(event) {
+var wrongWords=new Set();
+var savedWrong=new Set();
 
-let file = event.target.files[0]
+var correctCount=0;
+var revealed=false;
+var mode='all';
 
-let reader = new FileReader()
+/* STORAGE */
 
-reader.onload = function(e) {
+function lsGet(k){
+try{return localStorage.getItem(k)}
+catch(e){return null}
+}
 
-let text = e.target.result
+function lsSet(k,v){
+try{localStorage.setItem(k,v)}
+catch(e){}
+}
 
-parseCards(text)
+function lsDel(k){
+try{localStorage.removeItem(k)}
+catch(e){}
+}
 
-nextCard()
+/* LOAD SAVED */
+
+function loadSavedWrong(){
+
+var r=lsGet(LS_WRONG);
+
+if(!r) return new Set();
+
+try{
+return new Set(JSON.parse(r));
+}catch(e){
+return new Set();
+}
 
 }
 
-reader.readAsText(file)
+function persistSavedWrong(){
+
+lsSet(
+LS_WRONG,
+JSON.stringify([...savedWrong])
+);
+
+updateHeaderBadge();
+updateSavedModeBtn();
+updateWrongPanel();
+updateStats();
+showUploadSavedBanner();
 
 }
 
-function parseCards(text) {
+/* PROGRESS */
 
-cards = []
+function saveProgress(){
 
-let lines = text.split("\n")
+if(!deck.length) return;
 
-for (let line of lines) {
-
-if (
-line.startsWith("#")
-|| line.trim() === ""
-)
-continue
-
-let parts = line.split("\t")
-
-if (parts.length >= 2) {
-
-let word = parts[0]
-
-let meaning = parts[1]
-
-cards.push({
-word: word,
-meaning: meaning
+lsSet(
+LS_PROGRESS,
+JSON.stringify({
+index:currentIndex,
+correct:correctCount,
+mode:mode
 })
+);
 
+}
+
+function loadProgress(){
+
+var r=lsGet(LS_PROGRESS);
+
+if(!r) return null;
+
+try{
+return JSON.parse(r);
+}catch(e){
+return null;
 }
 
 }
 
-shuffle(cards)
+/* INIT */
+
+savedWrong=loadSavedWrong();
+
+updateHeaderBadge();
+showUploadSavedBanner();
+
+/* FILE */
+
+function loadFile(file){
+
+var reader=new FileReader();
+
+reader.onload=function(e){
+
+var cards=parseAnkiTxt(e.target.result);
+
+if(!cards.length){
+
+showToast('No cards found.');
+
+return;
 
 }
 
-function shuffle(array) {
+allCards=cards;
 
-for (let i = array.length - 1; i > 0; i--) {
+startSession();
 
-let j = Math.floor(Math.random() * (i + 1))
+showToast(
+'Loaded '+cards.length+' cards'
+);
 
-[array[i], array[j]] =
-[array[j], array[i]]
+};
+
+reader.readAsText(file,'UTF-8');
 
 }
 
-}
+/* SESSION */
 
-function nextCard() {
+function startSession(){
 
-if (cards.length === 0) return
+correctCount=0;
+wrongWords.clear();
 
-currentIndex =
-Math.floor(Math.random() * cards.length)
+deck=shuffle(allCards.slice());
 
-showingAnswer = false
+currentIndex=0;
 
 document
-.getElementById("wordBox")
-.innerHTML =
-cards[currentIndex].word
-
-}
-
-function showAnswer() {
-
-if (showingAnswer) return
+.getElementById('upload-screen')
+.classList.add('hidden');
 
 document
-.getElementById("wordBox")
-.innerHTML =
-cards[currentIndex].meaning
+.getElementById('study-screen')
+.classList.remove('hidden');
 
-showingAnswer = true
+document
+.getElementById('newDeckBtn')
+.classList.remove('hidden');
+
+var prog=loadProgress();
+
+if(
+prog &&
+prog.index<deck.length
+){
+
+currentIndex=prog.index||0;
+correctCount=prog.correct||0;
+
+if(prog.mode)
+mode=prog.mode;
 
 }
 
-function markCorrect() {
+updateModeButtons(mode);
+updateSavedModeBtn();
+updateStats();
+updateWrongPanel();
 
-nextCard()
+loadCard();
 
 }
 
-function markWrong() {
+/* CARD */
 
-wrongCards.push(
-cards[currentIndex]
+function loadCard(){
+
+if(currentIndex>=deck.length){
+
+showComplete();
+
+return;
+
+}
+
+revealed=false;
+
+var card=deck[currentIndex];
+
+document
+.getElementById('cardInner')
+.classList.remove('flipped');
+
+document
+.getElementById('cardWord')
+.textContent=card.word;
+
+document
+.getElementById('cardBackWord')
+.textContent=card.word;
+
+document
+.getElementById('cardDefinition')
+.innerHTML=card.definition;
+
+var tag=
+document.getElementById('cardSavedTag');
+
+if(savedWrong.has(card.word))
+tag.classList.remove('hidden');
+else
+tag.classList.add('hidden');
+
+document
+.getElementById('revealActions')
+.classList.remove('hidden');
+
+document
+.getElementById('judgeActions')
+.classList.add('hidden');
+
+saveProgress();
+
+updateStats();
+
+}
+
+/* REVEAL */
+
+function revealCard(){
+
+if(revealed) return;
+
+revealed=true;
+
+document
+.getElementById('cardInner')
+.classList.add('flipped');
+
+document
+.getElementById('revealActions')
+.classList.add('hidden');
+
+document
+.getElementById('judgeActions')
+.classList.remove('hidden');
+
+}
+
+/* MARK */
+
+function markCorrect(){
+
+if(!revealed) return;
+
+var card=deck[currentIndex];
+
+correctCount++;
+
+if(mode==='saved'){
+
+savedWrong.delete(card.word);
+
+persistSavedWrong();
+
+showToast(
+'Removed from saved',
+'correct'
+);
+
+}
+
+currentIndex++;
+
+saveProgress();
+
+updateStats();
+
+loadCard();
+
+}
+
+function markWrong(){
+
+if(!revealed) return;
+
+var card=deck[currentIndex];
+
+wrongWords.add(card.word);
+
+var isNew=
+!savedWrong.has(card.word);
+
+savedWrong.add(card.word);
+
+persistSavedWrong();
+
+if(isNew)
+showToast(
+'Saved to wrong list',
+'saved'
+);
+else
+showToast(
+'Already saved',
+'wrong'
+);
+
+currentIndex++;
+
+saveProgress();
+
+loadCard();
+
+}
+
+/* MODE */
+
+function setMode(m){
+
+if(
+m==='wrong' &&
+!wrongWords.size
+){
+showToast('No wrong words');
+return;
+}
+
+if(
+m==='saved' &&
+!savedWrong.size
+){
+showToast('No saved words');
+return;
+}
+
+mode=m;
+
+if(m==='wrong')
+deck=shuffle(
+allCards.filter(
+c=>wrongWords.has(c.word)
 )
+);
 
-updateWrongList()
+else if(m==='saved')
+deck=shuffle(
+allCards.filter(
+c=>savedWrong.has(c.word)
+)
+);
 
-nextCard()
+else
+deck=shuffle(allCards.slice());
+
+currentIndex=0;
+
+updateModeButtons(m);
+
+updateStats();
+
+loadCard();
+
+}
+
+/* CLEAR */
+
+function clearSavedWrong(){
+
+if(!savedWrong.size){
+
+showToast('Nothing to clear');
+
+return;
 
 }
 
-function showWrongPanel() {
+if(
+!confirm(
+'Clear saved wrong cards?'
+)
+) return;
 
-let panel =
-document.getElementById("wrongPanel")
+savedWrong.clear();
 
-panel.style.display =
-panel.style.display === "none"
-? "block"
-: "none"
+persistSavedWrong();
+
+showToast(
+'Cleared saved words'
+);
+
+}
+
+/* COMPLETE */
+
+function showComplete(){
+
+document
+.getElementById('study-screen')
+.classList.add('hidden');
+
+document
+.getElementById('complete-screen')
+.classList.remove('hidden');
+
+var pct=
+Math.round(
+(correctCount/deck.length)*100
+);
+
+document
+.getElementById('completeText')
+.textContent=
+'You got '+
+correctCount+
+' of '+
+deck.length+
+' correct ('+
+pct+
+'%).';
+
+lsDel(LS_PROGRESS);
 
 }
 
-function updateWrongList() {
+/* SHUFFLE */
 
-let list =
-document.getElementById("wrongList")
+function shuffle(arr){
 
-list.innerHTML = ""
+for(
+var i=arr.length-1;
+i>0;
+i--
+){
 
-for (let card of wrongCards) {
+var j=
+Math.floor(
+Math.random()*(i+1)
+);
 
-let div =
-document.createElement("div")
+var t=arr[i];
 
-div.innerHTML =
-"<b>" +
-card.word +
-"</b> – " +
-card.meaning
+arr[i]=arr[j];
 
-list.appendChild(div)
+arr[j]=t;
 
 }
+
+return arr;
 
 }
 
 </script>
-
-</body>
-</html>
