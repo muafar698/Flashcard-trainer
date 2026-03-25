@@ -1,0 +1,266 @@
+import tkinter as tk
+from tkinter import filedialog
+import random
+import re
+import html
+
+# =========================
+# DATA
+# =========================
+
+main_words = []
+wrong_words = []
+
+current_list = main_words
+current_index = 0
+
+# =========================
+# CLEAN HTML FUNCTION
+# =========================
+
+def clean_html(text):
+
+   text = html.unescape(text)
+
+   # remove HTML tags
+   text = re.sub("<.*?>", "", text)
+
+   # remove extra spaces
+   text = text.replace("\n", " ")
+   text = text.strip()
+
+   # keep only first definition
+   if "<br>" in text:
+       text = text.split("<br>")[0]
+
+   return text
+
+# =========================
+# LOAD FILE
+# =========================
+
+def load_file():
+
+   global main_words
+   global current_list
+   global current_index
+
+   file_path = filedialog.askopenfilename(
+       filetypes=[("Text Files", "*.txt")]
+   )
+
+   if not file_path:
+       return
+
+   main_words.clear()
+
+   with open(file_path, "r", encoding="utf-8") as f:
+
+       for line in f:
+
+           # skip metadata
+           if line.startswith("#"):
+               continue
+
+           parts = line.split("\t")
+
+           if len(parts) < 2:
+               continue
+
+           word = parts[0].strip()
+           meaning = parts[1].strip()
+
+           meaning = clean_html(meaning)
+
+           if word and meaning:
+
+               main_words.append({
+                   "front": word,
+                   "back": meaning
+               })
+
+   random.shuffle(main_words)
+
+   current_list = main_words
+   current_index = 0
+
+   update_word()
+
+# =========================
+# DISPLAY WORD
+# =========================
+
+def update_word():
+
+   global current_index
+
+   if not current_list:
+       word_label.config(text="Ingen data")
+       meaning_label.config(text="")
+       return
+
+   if current_index >= len(current_list):
+       current_index = 0
+       random.shuffle(current_list)
+
+   word = current_list[current_index]
+
+   word_label.config(text=word["front"])
+   meaning_label.config(text="")
+
+# =========================
+# SHOW ANSWER
+# =========================
+
+def show_answer():
+
+   word = current_list[current_index]
+
+   meaning_label.config(text=word["back"])
+
+# =========================
+# MARK RIGHT
+# =========================
+
+def mark_right():
+
+   global current_index
+
+   current_index += 1
+   update_word()
+
+# =========================
+# MARK WRONG
+# =========================
+
+def mark_wrong():
+
+   global current_index
+
+   word = current_list[current_index]
+
+   if word not in wrong_words:
+       wrong_words.append(word)
+
+   current_index += 1
+   update_word()
+
+# =========================
+# SWITCH PANELS
+# =========================
+
+def show_main():
+
+   global current_list
+   global current_index
+
+   current_list = main_words
+   current_index = 0
+
+   update_word()
+
+def show_wrong():
+
+   global current_list
+   global current_index
+
+   current_list = wrong_words
+   current_index = 0
+
+   update_word()
+
+# =========================
+# CLEAR WRONG LIST
+# =========================
+
+def clear_wrong():
+
+   wrong_words.clear()
+
+# =========================
+# UI
+# =========================
+
+root = tk.Tk()
+root.title("Flashcard Trainer")
+root.geometry("800x600")
+
+# Top Buttons
+
+top_frame = tk.Frame(root)
+top_frame.pack(pady=10)
+
+load_button = tk.Button(
+   top_frame,
+   text="Ladda ordlista",
+   command=load_file
+)
+load_button.pack(side=tk.LEFT, padx=5)
+
+main_button = tk.Button(
+   top_frame,
+   text="Alla ord",
+   command=show_main
+)
+main_button.pack(side=tk.LEFT, padx=5)
+
+wrong_button = tk.Button(
+   top_frame,
+   text="Fel ord",
+   command=show_wrong
+)
+wrong_button.pack(side=tk.LEFT, padx=5)
+
+clear_button = tk.Button(
+   top_frame,
+   text="Töm Fel",
+   command=clear_wrong
+)
+clear_button.pack(side=tk.LEFT, padx=5)
+
+# Word Display
+
+word_label = tk.Label(
+   root,
+   text="Ladda en fil",
+   font=("Arial", 30)
+)
+word_label.pack(pady=40)
+
+meaning_label = tk.Label(
+   root,
+   text="",
+   font=("Arial", 18),
+   wraplength=700
+)
+meaning_label.pack(pady=20)
+
+# Bottom Buttons
+
+bottom_frame = tk.Frame(root)
+bottom_frame.pack(pady=20)
+
+show_button = tk.Button(
+   bottom_frame,
+   text="Visa svar",
+   command=show_answer
+)
+show_button.pack(side=tk.LEFT, padx=5)
+
+right_button = tk.Button(
+   bottom_frame,
+   text="Rätt",
+   command=mark_right
+)
+right_button.pack(side=tk.LEFT, padx=5)
+
+wrong_button = tk.Button(
+   bottom_frame,
+   text="Fel",
+   command=mark_wrong
+)
+wrong_button.pack(side=tk.LEFT, padx=5)
+
+update_word()
+
+root.mainloop()
